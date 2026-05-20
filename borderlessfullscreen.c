@@ -10,8 +10,10 @@
  *   - Matches screen resolution exactly
  * 
  * Architecture:
- *   ShellHost.exe (parent process concept)
- *   └── DesktopSurfaceWindow (borderless popup, full screen)
+ *   ShellHost
+├── MenuBar
+├── DesktopSurface
+└── WindowTracker
  */
 
 #define _WIN32_WINNT 0x0500
@@ -22,11 +24,12 @@
 /* ─── Constants ─── */
 #define WINDOW_CLASS_NAME L"DesktopSurfaceWindow"
 #define WINDOW_TITLE      L"DesktopSurfaceWindow"
+#define IDC_TOP_BUTTON    1001
 
 /* ─── Globals ─── */
 static HWND g_hwnd = NULL;
 static HMONITOR g_hMonitor = NULL;
-static BOOL g_bPreventFocus = TRUE;  /* set FALSE during creation to avoid recursion */
+static BOOL g_bPreventFocus = FALSE;  /* set FALSE during creation to avoid recursion */
 
 /**
  * Prevent this window from stealing focus / becoming foreground.
@@ -63,31 +66,6 @@ static void GetFullscreenRect(RECT *rect) {
     rect->bottom = mi.rcMonitor.bottom;
 }
 
-/**
- * Get the virtual desktop bounds covering all monitors.
- * This is the key to "desktop layer" behavior across multiple monitors.
- */
-static void GetVirtualDesktopRect(RECT *rect) {
-    rect->left   = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    rect->top    = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    rect->right  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    rect->bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-}
-
-/**
- * Get the appropriate fullscreen rect based on multi-monitor mode.
- * If multi-monitor mode is enabled, use the virtual desktop rect.
- * Otherwise, use the primary monitor's bounds.
- */
-static void GetAppropriateFullscreenRect(RECT *rect) {
-    /* Check if we have multiple monitors */
-    if (GetSystemMetrics(SM_CMONITORS) > 1) {
-        GetVirtualDesktopRect(rect);
-    } else {
-        GetFullscreenRect(rect);
-    }
-}
-
 /* ─── Window Procedure ─── */
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
@@ -95,21 +73,58 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             /* Size to fullscreen immediately after creation. */
         {
             RECT rect;
-            GetAppropriateFullscreenRect(&rect);
+            GetFullscreenRect(&rect);
             /* HWND_BOTTOM = stay below all normal windows. */
             SetWindowPos(hwnd, HWND_BOTTOM,
                          rect.left, rect.top,
                          rect.right  - rect.left,
                          rect.bottom - rect.top,
                          SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+            /* Create a button in the top white band. */
+            CreateWindowW(L"BUTTON", L"🍎",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          5, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            CreateWindowW(L"BUTTON", L"File",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          105, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            CreateWindowW(L"BUTTON", L"Edit",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          205, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            CreateWindowW(L"BUTTON", L"View",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          305, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            CreateWindowW(L"BUTTON", L"Special",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          405, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            CreateWindowW(L"BUTTON", L"Help",
+                          WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                          505, 4, 100, 24, /* X=10, Y=4, Width=100, Height=24 */
+                          hwnd, (HMENU)IDC_TOP_BUTTON,
+                          ((LPCREATESTRUCT)lParam)->hInstance, NULL);
             return 0;
         }
 
         case WM_DISPLAYCHANGE:
-            /* Monitor resolution changed — resize to cover entire virtual desktop. */
+            /* Monitor resolution changed — resize to primary monitor. */
         {
             RECT rect;
-            GetVirtualDesktopRect(&rect);
+            GetFullscreenRect(&rect);
             /* HWND_BOTTOM = stay below all normal windows. */
             SetWindowPos(hwnd, HWND_BOTTOM,
                          rect.left, rect.top,
@@ -138,7 +153,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         {
             HWND hwndNewFocus = (HWND)wParam;
             if (hwndNewFocus != NULL) {
-                SetFocus(hwndNewFocus);
+            SetFocus(hwndNewFocus);
             }
             return 0;
         }
@@ -148,16 +163,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             InvalidateRect(hwnd, NULL, TRUE);
             return 0;
 
-        case WM_KEYDOWN:
-            /* Ctrl+Q to quit */
-            if (wParam == 'Q' && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) {
-                DestroyWindow(hwnd);
-                return 0;
-            }
-            /* Escape to quit */
-            if (wParam == VK_ESCAPE) {
-                DestroyWindow(hwnd);
-                return 0;
+        case WM_COMMAND:
+            /* Handle button clicks. */
+            if (LOWORD(wParam) == IDC_TOP_BUTTON) {
+                MessageBoxW(hwnd, L"The button works!", L"Notice", MB_OK | MB_ICONINFORMATION);
             }
             return 0;
 
@@ -165,21 +174,86 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
 
-            /* Fill with a dark background to prove the window exists. */
-            HBRUSH hBrush = CreateSolidBrush(RGB(18, 18, 24));
-            FillRect(hdc, &ps.rcPaint, hBrush);
-            DeleteObject(hBrush);
-
-            /* Draw a small label in the corner. */
-            char buf[128];
             RECT clientRect;
             GetClientRect(hwnd, &clientRect);
-            wsprintfA(buf, "DesktopSurfaceWindow  |  %dx%d  |  Borderless Fullscreen",
+
+            /* Fill the entire client area with a dark background to ensure everything aligns perfectly. */
+            HBRUSH hBrush = CreateSolidBrush(RGB(138, 138, 138));
+            FillRect(hdc, &clientRect, hBrush);
+            DeleteObject(hBrush);
+
+            /* Draw a narrow white band at the top. */
+            RECT topBandRect = clientRect;
+            topBandRect.bottom = 32; /* whatever pixels height */
+
+            /* Create a white brush for the inside and a thick black pen for the border */
+            HBRUSH hWhiteBrush = CreateSolidBrush(RGB(255, 255, 255));
+            HPEN hBlackPen = CreatePen(PS_INSIDEFRAME, 2, RGB(0, 0, 0)); /* 2 pixels thick */
+            
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hWhiteBrush);
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hBlackPen);
+            
+            /* Rectangle() draws the border using the selected pen and fills with the selected brush */
+            Rectangle(hdc, topBandRect.left, topBandRect.top, topBandRect.right, topBandRect.bottom);
+            
+            SelectObject(hdc, hOldBrush);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hWhiteBrush);
+            DeleteObject(hBlackPen);
+
+            /* Draw a small label in the corner. */
+            char buf[256];
+
+            SYSTEMTIME st;
+            GetSystemTime(&st);
+
+            /* Get UTC time. */
+
+            wsprintfA(buf, "Hello",
                       clientRect.right - clientRect.left,
-                      clientRect.bottom - clientRect.top);
-            SetTextColor(hdc, RGB(100, 100, 120));
+                      clientRect.bottom - clientRect.top,
+                      st.wHour,
+                      st.wMinute,
+                      st.wSecond);
+
+            SetTextColor(hdc, RGB(255, 255, 255));
+            SetBkColor(hdc, RGB(138, 138, 138));
             SetBkMode(hdc, TRANSPARENT);
-            TextOutA(hdc, 16, 16, buf, lstrlenA(buf));
+
+            /* Create a custom font */
+            HFONT hFont = CreateFontA(
+                48,                        /* cHeight (Text size) */
+                0,                         /* cWidth (0 = automatically match height) */
+                0,                         /* cEscapement */
+                0,                         /* cOrientation */
+                FW_THIN,                   /* cWeight (e.g., FW_NORMAL, FW_BOLD, FW_HEAVY) */
+                FALSE,                     /* bItalic */
+                FALSE,                     /* bUnderline */
+                FALSE,                     /* bStrikeOut */
+                ANSI_CHARSET,              /* iCharSet */
+                OUT_DEFAULT_PRECIS,        /* iOutPrecision */
+                CLIP_DEFAULT_PRECIS,       /* iClipPrecision */
+                CLEARTYPE_QUALITY,         /* iQuality (Antialiasing) */
+                DEFAULT_PITCH | FF_SWISS,  /* iPitchAndFamily */
+                "Fixedsys"                 /* pszFaceName (Font style/family) */
+            );
+            
+            /* Select the new font into the device context and save the old one */
+            HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+            /* Measure the exact width and height of the text */
+            SIZE textSize;
+            GetTextExtentPoint32A(hdc, buf, lstrlenA(buf), &textSize);
+
+            /* Calculate coordinates to place the text exactly in the center */
+            int x = (clientRect.right - textSize.cx) / 2;
+            int y = (clientRect.bottom - textSize.cy) / 2;
+
+            TextOutA(hdc, x, y, buf, lstrlenA(buf));
+
+            /* Clean up: restore the old font and delete the custom font to prevent memory leaks */
+            SelectObject(hdc, hOldFont);
+            DeleteObject(hFont);
 
             EndPaint(hwnd, &ps);
             return 0;
@@ -237,9 +311,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    /* 3. Size to the virtual desktop's full bounds (not work area). */
+    /* 3. Size to the primary monitor's full bounds (not work area). */
     RECT rect;
-    GetVirtualDesktopRect(&rect);
+    GetFullscreenRect(&rect);
     /* HWND_BOTTOM = stay at the bottom of the Z-order, below all normal windows. */
     SetWindowPos(g_hwnd, HWND_BOTTOM,
                  rect.left, rect.top,
