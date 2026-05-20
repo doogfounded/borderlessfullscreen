@@ -1,2 +1,2 @@
-# borderlessfullscreen
-a simple win32 app that makes a borderless fullscreen window all across your monitors in the color gray 
+# shittymacos-win32
+a simple win32 app that looks like a poor mans version of the first mac
